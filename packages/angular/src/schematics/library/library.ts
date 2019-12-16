@@ -114,7 +114,7 @@ function addRouterConfiguration(options: NormalizedSchema): Rule {
 }
 
 function addLoadChildren(options: NormalizedSchema): Rule {
-  return (host: Tree) => {
+  return (host: Tree, context: SchematicContext) => {
     const npmScope = getNpmScope(host);
 
     if (!host.exists(options.parentModule)) {
@@ -129,17 +129,23 @@ function addLoadChildren(options: NormalizedSchema): Rule {
       true
     );
 
-    insert(host, options.parentModule, [
-      ...addRoute(
-        options.parentModule,
-        sourceFile,
-        `{path: '${toFileName(
-          options.fileName
-        )}', loadChildren: () => import('@${npmScope}/${
-          options.projectDirectory
-        }').then(module => module.${options.moduleName})}`
-      )
-    ]);
+    const routeChanges = addRoute(
+      options.parentModule,
+      sourceFile,
+      `{path: '${toFileName(
+        options.fileName
+      )}', loadChildren: () => import('@${npmScope}/${
+        options.projectDirectory
+      }').then(module => module.${options.moduleName})}`
+    );
+
+    if (routeChanges.length > 0) {
+      insert(host, options.parentModule, [...routeChanges]);
+    } else {
+      context.logger.warn(
+        `Unable to add lazy route, no route configuration was found in '${options.parentModule}'.`
+      );
+    }
 
     const tsConfig = findClosestTsConfigApp(host, options.parentModule);
     if (tsConfig) {
@@ -161,6 +167,9 @@ function addLoadChildren(options: NormalizedSchema): Rule {
       ]);
     } else {
       // we should warn the user about not finding the config
+      context.logger.warn(
+        `No application TypeScript configuration was found for '${options.parentModule}'.`
+      );
     }
 
     return host;
@@ -182,7 +191,7 @@ function findClosestTsConfigApp(
 }
 
 function addChildren(options: NormalizedSchema): Rule {
-  return (host: Tree) => {
+  return (host: Tree, context: SchematicContext) => {
     const npmScope = getNpmScope(host);
     if (!host.exists(options.parentModule)) {
       throw new Error(`Cannot find '${options.parentModule}'`);
@@ -197,6 +206,18 @@ function addChildren(options: NormalizedSchema): Rule {
     const constName = `${toPropertyName(options.fileName)}Routes`;
     const importPath = `@${npmScope}/${options.projectDirectory}`;
 
+    const routeChanges = addRoute(
+      options.parentModule,
+      sourceFile,
+      `{path: '${toFileName(options.fileName)}', children: ${constName}}`
+    );
+
+    if (routeChanges.length === 0) {
+      context.logger.warn(
+        `Unable to add lazy route, no route configuration was found in '${options.parentModule}'.`
+      );
+    }
+
     insert(host, options.parentModule, [
       insertImport(
         sourceFile,
@@ -209,11 +230,7 @@ function addChildren(options: NormalizedSchema): Rule {
         options.parentModule,
         options.moduleName
       ),
-      ...addRoute(
-        options.parentModule,
-        sourceFile,
-        `{path: '${toFileName(options.fileName)}', children: ${constName}}`
-      )
+      ...routeChanges
     ]);
     return host;
   };
